@@ -28,7 +28,6 @@ def decode_token_service(token: str) -> Dict[str, Any]:
     Fungsi utilitas untuk mendekode token atau mencocokkannya dengan database/penyimpanan.
     (Bisa diganti dengan JWT decode menggunakan PyJWT atau python-jose di produksi).
     """
-    # Pake TOKEN_TO_USER yang sama, jangan bikin user_database kedua
     user = TOKEN_TO_USER.get(token)
     if user is None:
         raise ValueError("Invalid token")

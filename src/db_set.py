@@ -3,7 +3,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import os
 
-# Path pathlib dari file ini: src/db_set.py -> /app
 ROOT = Path(__file__).resolve().parent.parent
 
 def get_engine():
@@ -19,7 +18,6 @@ def run_sql(connection, file_path: Path):
         print(f"File SQL {file_path.name} tidak ditemukan di {file_path}, dilewati.")
 
 def db_set():
-    # Cuma bikin schema + tabel, TIDAK isi CSV
     engine = get_engine()
     setup_sql_path = ROOT / "setup.sql"
     print("Memulai eksekusi skrip SQL...")
@@ -30,7 +28,6 @@ def db_set():
     print("Eksekusi SQL selesai.\n")
 
 def check_and_fill_csv(engine):
-    # Nama kolom HARUS sama persis kayak di setup.sql
     COLS = {
         "carrier_daily": [
             "metric_date", "carrier_id",
@@ -44,7 +41,6 @@ def check_and_fill_csv(engine):
             "on_time_delivered_count", "late_delivered_count", "in_transit_count",
             "shipping_fee_idr", "refund_amount_idr"
         ],
-        # Cek sisa kolom shipment_fact lo di bawah, samain kalau beda
         "shipment_fact": [
             "shipment_id", "order_date", "carrier_id", "origin_hub", "destination_city",
             "service_level", "promised_delivery_at_utc", "delivered_at_utc",
@@ -94,7 +90,6 @@ def check_and_fill_csv(engine):
     print("\nPemeriksaan/pengisian data CSV selesai!")
 
 if __name__ == "__main__":
-    # Buat tes manual doang, bukan buat lifespan
     eng = get_engine()
     db_set()
     check_and_fill_csv(eng)

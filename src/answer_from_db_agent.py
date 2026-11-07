@@ -16,8 +16,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-# ============ 0. SETUP ============
-# Cari .env ke atas sampai ketemu (fix error repo_root kemarin)
 for _p in [Path.cwd(), *Path.cwd().parents]:
     if (_p / ".env").is_file():
         load_dotenv(_p / ".env", override=False)
@@ -30,7 +28,6 @@ API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 if not API_KEY:
     raise RuntimeError("OPENAI_API_KEY belum ada di .env. Isi dulu sebelum jalanin agent.")
 
-# max_completion_tokens, bukan max_tokens (fix InvalidRequestError kemarin)
 llm = ChatOpenAI(model=MODEL, timeout=90, max_retries=1, max_completion_tokens=2000)
 
 OUT_DIR = Path("output")
@@ -45,8 +42,6 @@ def _safe_filename(text: str) -> str:
 def _unique_chart_path(question: str) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return CHART_DIR / f"{ts}_{_safe_filename(question)}_{uuid.uuid4().hex[:6]}.png"
-
-# ============ 1. TOOLS ============
 
 @tool
 def make_table(columns: list, rows: list) -> str:
@@ -80,7 +75,7 @@ def make_chart(columns: list, rows: list, question: str, chart_type: str = "bar"
         return f"Gagal: chart_type '{chart_type}' tidak dikenal. Pilih: bar, line, pie, scatter, hist, stacked_bar, heatmap"
 
     df = pd.DataFrame(rows, columns=columns)
-    out_path = _unique_chart_path(question)  # FIX: gak lagi chart.png doang, biar gak ketimpa
+    out_path = _unique_chart_path(question)  
 
     try:
         plt.figure(figsize=(10, 5))
@@ -191,8 +186,6 @@ def make_pdf_report(title: str, narrative: str, table_markdown: str = "", chart_
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
-
-    # 1. Narasi
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_fill_color(239, 246, 255)
     pdf.cell(0, 9, "  Ringkasan & Analisis", new_x="LMARGIN", new_y="NEXT", fill=True)
@@ -201,7 +194,6 @@ def make_pdf_report(title: str, narrative: str, table_markdown: str = "", chart_
     pdf.multi_cell(0, 6, safe(narrative))
     pdf.ln(4)
 
-    # 2. Tabel - max 20 baris biar muat A4
     if table_markdown and "Gagal" not in table_markdown:
         pdf.set_font("Helvetica", "B", 12)
         pdf.set_fill_color(239, 246, 255)
@@ -227,7 +219,6 @@ def make_pdf_report(title: str, narrative: str, table_markdown: str = "", chart_
                 pdf.cell(0, 6, safe(f"... dan {len(lines)-21} baris lainnya (lihat tabel lengkap di chat)"), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
-    # 3. Grafik - masuk PDF, ini yang kemarin ketinggalan
     if chart_path and Path(chart_path).is_file():
         if pdf.get_y() > 150:
             pdf.add_page()
@@ -250,19 +241,14 @@ def extract_text(resp):
         return content
     if isinstance(content, list):
         for c in content:
-            # c bisa dict: {'type': 'text', 'text': '...'}
             if isinstance(c, dict):
                 if c.get("type") == "text":
                     return c.get("text", "")
-                # SKIP kalau type == "reasoning"
                 continue
-            # c bisa object: c.type == "text"
             if getattr(c, "type", "") == "text":
                 return getattr(c, "text", "")
         return ""
     return str(content) if content else ""
-
-# ============ 2. AGENT ============
 
 llm_with_tools = llm.bind_tools([make_table, make_chart, make_pdf_report])
 
@@ -317,7 +303,6 @@ def answer_from_db_agent(question: str, sql: str, columns: list, rows: list, his
     jawaban = extract_text(resp)
 
     if not ai_msg.tool_calls:
-        # Jalur TEST-INJECT-004 lewat sini - cuma 1 angka, gak pake tool
         return _tambah_disclaimer(jawaban), None
 
     results = []

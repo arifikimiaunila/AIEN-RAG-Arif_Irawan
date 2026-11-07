@@ -26,14 +26,12 @@ def api_request(method: str, path: str, token: str, **kwargs: Any) -> dict | Non
             detail = exc.response.json().get("detail", "Permintaan gagal")
         except ValueError:
             detail = "Permintaan gagal"
-        # Jangan tampilkan error untuk 404 saat cek detail percakapan yang sudah dihapus
         if exc.response.status_code != 404:
             st.error(f"API {exc.response.status_code}: {detail}")
     except (httpx.RequestError, ValueError):
         st.error("Backend tidak tersedia atau respons tidak valid.")
     return None
 
-# Helper untuk merender chart dari backend
 def render_chart_from_message(message: dict):
     if not isinstance(message, dict):
         return
@@ -61,7 +59,6 @@ st.set_page_config(page_title="Agent Analitik Pengiriman & Validasi", page_icon=
 st.title("📦 Agent Analitik Pengiriman (Gold Layer)")
 st.caption("Fakta analitik berasal dari Neon Gold. Percakapan demo disimpan oleh backend.")
 
-# --- SIDEBAR: AUTENTIKASI & USER VALIDATION ---
 st.sidebar.header("🔐 Autentikasi & Role")
 
 token_options = {
@@ -221,7 +218,6 @@ if st.sidebar.button("🔍 Cek Akses Saya"):
 
 st.sidebar.markdown("---")
 
-# --- MANAJEMEN PERCAKAPAN CHAT ---
 if st.sidebar.button("Percakapan baru"):
     created = api_request("POST", "/api/v1/conversations", token, json={})
     if created:
@@ -238,8 +234,6 @@ ids = [item["id"] for item in conversations]
 if ids:
     current = st.session_state.get("conversation_id")
     if current not in ids:
-        # JANGAN auto-pilih ids[0]. Kalau None, biarkan None sampai user milih / bikin baru.
-        # Ini yang bikin conv lama keliatan ke-recreate.
         current = None
         st.session_state["conversation_id"] = None
         st.session_state.pop("just_deleted", None)
@@ -259,7 +253,6 @@ if ids:
             st.session_state.pop("confirm_delete", None)
             st.rerun()
 
-        # === TOMBOL HAPUS ===
         st.sidebar.markdown("---")
         if not st.session_state.get("confirm_delete"):
             if st.sidebar.button("🗑️ Hapus Percakapan", key="btn_hapus"):
@@ -271,7 +264,6 @@ if ids:
             with col1:
                 if st.button("✅ Ya, Hapus", key="btn_confirm_hapus", use_container_width=True):
                     cid = st.session_state.get("conversation_id")
-                    # Panggil API hapus - kalau backend belum ada endpoint, tetap bersihkan session
                     api_request("DELETE", f"/api/v1/conversations/{cid}", token)
                     st.session_state["conversation_id"] = None
                     st.session_state["draft_pertanyaan"] = ""
@@ -317,7 +309,6 @@ if conversation_id:
             if result:
                 st.rerun()
     else:
-        # Detail 404 = sudah dihapus di DB, bersihkan session biar tidak ke-recreate
         st.session_state["conversation_id"] = None
         st.session_state["draft_pertanyaan"] = ""
         st.rerun()

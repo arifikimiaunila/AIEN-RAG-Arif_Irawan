@@ -176,7 +176,6 @@ def strip_sql_comments(sql: str) -> str:
 
 def _guard_user_input(question: str):
     q = question.lower()
-    # Cek input user, bukan cuma output LLM
     for k in FORBIDDEN_SQL:
         if re.search(r'\b' + k + r'\b', q):
             raise ValueError(f"Forbidden keyword in question: {k}")
@@ -194,8 +193,6 @@ def generate_sql(question: str, username: str, role: str, engine, history: str =
     clean_cand = strip_sql_comments(cand)
     
     def _fix_table(m):
-        # JANGAN rewrite FROM raw / FROM weekly jadi FROM shipment_fact
-        # Itu yang bikin error dimensi / minggu kemarin
         return m.group(0)
 
     clean_cand = re.sub(
@@ -256,10 +253,9 @@ def generate_sql(question: str, username: str, role: str, engine, history: str =
     if allowed_cols is not None:
         if re.search(r"select\s+\*", clean_cand, flags=re.IGNORECASE):
             raise ValueError("SELECT * dilarang, harus sebutin kolom eksplisit sesuai role")
-    # HARD GATE RBAC: blokir kolom finance untuk role non-finance
-    # Prompt saja tidak cukup, LLM bisa nurut ke user yang bilang "abaikan pembatasan"
+    
     if role in ("ops_logistik", "customer_service", "marketing"):
-        for forbidden_col in ["shipping_fee_idr"]:  # refund diizinkan untuk ops, ini metrik operasional
+        for forbidden_col in ["shipping_fee_idr"]:  
             if forbidden_col in low:
                 raise ValueError(f"Kolom {forbidden_col} tidak diizinkan untuk role {role}")
 

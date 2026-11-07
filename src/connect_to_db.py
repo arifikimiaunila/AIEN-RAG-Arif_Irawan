@@ -20,8 +20,6 @@ def connect_to_db(
 
     if tables is None:
         tables = ["shipment_fact", "carrier_daily", "city_daily"]
-
-    # Buat engine dan instance database
     engine = create_engine(rag_database_url, pool_pre_ping=True)
     db = SQLDatabase(
         engine=engine,
@@ -31,7 +29,6 @@ def connect_to_db(
         sample_rows_in_table_info=2,
     )
 
-    # Verifikasi koneksi dan konfigurasi database
     with engine.connect() as connection:
         connection_info = (
             connection.execute(
@@ -45,7 +42,6 @@ def connect_to_db(
             .one()
         )
 
-    # Validasi kelengkapan tabel
     available_tables = db.get_usable_table_names()
     missing_tables = sorted(set(tables) - set(available_tables))
 
