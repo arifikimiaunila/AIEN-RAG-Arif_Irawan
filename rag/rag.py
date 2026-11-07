@@ -24,7 +24,6 @@ schema_text = None
 generate_sql = None
 execute_readonly = None
 
-# --- SQLite untuk percakapan, biar awet pas restart ---
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -76,7 +75,7 @@ def _get_conv_or_404(conversation_id: str, owner_id: str):
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Conversation tidak ditemukan")
-        # Samain pesan + status kayak ID gak ada, biar gak bocor eksistensi
+        
         if row["owner_id"] != owner_id:
             raise HTTPException(status_code=404, detail="Conversation tidak ditemukan")
         msgs = conn.execute(
@@ -115,7 +114,7 @@ async def lifespan(app: FastAPI):
     print("Inisialisasi database dan pemuatan data untuk RAG...")
     global db, engine, schema_text, generate_sql, execute_readonly
 
-    # Init SQLite dulu, biar percakapan lama langsung kebaca
+    
     _init_sqlite()
     print(f"SQLite percakapan siap di: {_sqlite_path()}")
 
@@ -129,14 +128,12 @@ async def lifespan(app: FastAPI):
             raise ValueError("RAG_DATABASE_URL / DATABASE_URL kosong di container api, cek .env / docker-compose.yml")
         url = url.replace('postgresql+psycopg2://', 'postgresql://').strip('"').strip("'")
 
-        # --- 1. Bikin schema + tabel dulu, terpisah ---
+        
         from src.db_set import db_set, check_and_fill_csv, get_engine
         print("[lifespan] Menjalankan db_set()...")
         db_set()
         print("[lifespan] db_set() selesai.")
-
-        # --- 2. Isi CSV di sini, terpisah, biar terdeteksi ---
-        # Cek COUNT dulu, bukan cek tabel ada. Kalau 0, baru isi.
+        
         conn = psycopg.connect(url)
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM gold.shipment_fact;")
@@ -218,11 +215,8 @@ def create_conversation(payload: dict | None = None, authorization: str | None =
     import uuid
     conn = _get_sqlite()
     try:
-        # JANGAN reuse conv-N, pakai UUID biar ID yang dihapus tidak pernah hidup lagi
         conv_id = f"conv-{uuid.uuid4().hex[:8]}"
         now = _now_iso()
-        # Title pakai MAX nomor dari title yang ada, BUKAN COUNT.
-        # COUNT turun kalau ada yang dihapus -> title duplikat.
         rows_t = conn.execute("SELECT title FROM conversations").fetchall()
         max_n = 0
         for r in rows_t:
@@ -260,7 +254,6 @@ def get_conversation(conversation_id: str, authorization: str | None = Header(No
 @app.delete("/api/v1/conversations/{conversation_id}")
 def delete_conversation(conversation_id: str, authorization: str | None = Header(None)):
     user = get_user_from_token(authorization)
-    # Cek dulu kepemilikan - kalau bukan punya dia / gak ada, lempar 404 kayak GET
     _get_conv_or_404(conversation_id, user["username"])
     conn = _get_sqlite()
     try:
@@ -484,14 +477,12 @@ def _summarize_data_basis(sql: str) -> str:
         return ""
     tables = re.findall(r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)", sql, flags=re.IGNORECASE)
     tables = list(dict.fromkeys(tables))
-    # Ambil filter tanggal kalau ada
     dates = re.findall(r"DATE\s*'(\d{4}-\d{2}-\d{2})'", sql)
     periode = ""
     if len(dates) >= 2:
         periode = f", Periode: order_date {dates[0]} s.d. < {dates[1]}"
     elif len(dates) == 1:
         periode = f", Periode: order_date >= {dates[0]}"
-    # Ambil filter status kalau ada
     filt = ""
     if "delivery_status = 'delivered'" in sql or 'delivery_status' in sql:
         filt = ", Filter: delivery_status='delivered'"
