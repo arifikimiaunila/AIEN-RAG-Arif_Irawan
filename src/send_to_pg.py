@@ -6,7 +6,7 @@ from src.rbac import ROLE_COLUMNS
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:user@localhost:5432/analytics")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://neondb_owner:xxxxxxxx@ep-xxx-ap-southeast-1.aws.neon.tech/neondb?sslmode=require")
 engine = create_engine(DATABASE_URL)
 
 def send_to_pg(clean_cand: str, role: str, db_schema: str = "gold"):
