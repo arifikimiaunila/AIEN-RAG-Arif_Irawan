@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import psycopg2
+from src.system_prompt import FORBIDDEN_SQL
 from datetime import datetime, timezone
 from fastapi import Header
 from fastapi import FastAPI, HTTPException
@@ -23,6 +24,45 @@ schema_text = None
 
 generate_sql = None
 execute_readonly = None
+
+FORBIDDEN_INJECTION = [
+    "abaikan instruksi", "abaikan perintah", "lupakan instruksi",
+    "ignore previous", "ignore all previous", "disregard",
+    "jangan ikuti sistem", "mode developer", "jailbreak",
+    "tampilkan password", "tampilkan semua user",
+    "buka tabel", "tampilkan isi tabel",
+]
+
+def is_forbidden(question: str) -> bool:
+    q = question.lower()
+    if any(p in q for p in FORBIDDEN_INJECTION):
+        return True
+    for kw in FORBIDDEN_SQL:
+        if re.search(r'\b' + re.escape(kw) + r'\b', q):
+            return True
+    return False
+
+def simpan_dan_return(conversation_id, jawaban_error):
+    conn_err = _get_sqlite()
+    try:
+        conn_err.execute(
+            "INSERT INTO messages (conversation_id, role, content, chart_base64, created_at) VALUES (?, ?, ?, ?, ?)",
+            (conversation_id, "assistant", jawaban_error, None, _now_iso()),
+        )
+        conn_err.execute(
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            (_now_iso(), conversation_id),
+        )
+        conn_err.commit()
+    finally:
+        conn_err.close()
+    return {
+        "conversation_id": conversation_id,
+        "answer": jawaban_error,
+        "data_basis": "Tidak ada - perintah berbahaya ditolak",
+        "outcome": "refused",
+        "message": {"role": "assistant", "content": jawaban_error}
+    }
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -271,7 +311,7 @@ def delete_conversation(conversation_id: str, authorization: str | None = Header
         conn.close()
 
 @app.post("/api/v1/conversations/{conversation_id}/messages")
-def ask_conversation_message(
+def ask_conversation_message(        
     conversation_id: str,
     payload: dict,
     authorization: str | None = Header(None)
@@ -281,6 +321,9 @@ def ask_conversation_message(
 
     question = payload.get("content", "") or payload.get("prompt", "")
     history = "\n".join([f"{m['role']}: {m['content']}" for m in conv["messages"][-6:]])
+    if is_forbidden(question):
+        jawaban_error = "Maaf, permintaan tersebut ditolak karena mengandung perintah berbahaya yang tidak diizinkan. Saya hanya bisa membantu seputar analitik pengiriman."
+        return simpan_dan_return(conversation_id, jawaban_error)
     conn = _get_sqlite()
     try:
         conn.execute(
@@ -393,30 +436,12 @@ def ask_conversation_message(
             sql, columns, rows = sql_generator(corrected_question, username, role, engine)
         except Exception as e2:
             print(f"[ERROR] retry generate_sql gagal juga: {e2}", flush=True)
-            jawaban_error = "Maaf, query tidak bisa dijalankan karena saya salah memilih tabel. Coba tanyakan ulang."
-            conn_err = _get_sqlite()
-            try:
-                conn_err.execute(
-                    "INSERT INTO messages (conversation_id, role, content, chart_base64, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (conversation_id, "assistant", jawaban_error, None, _now_iso()),
-                )
-                conn_err.execute(
-                    "UPDATE conversations SET updated_at = ? WHERE id = ?",
-                    (_now_iso(), conversation_id),
-                )
-                conn_err.commit()
-            finally:
-                conn_err.close()
-            return {
-                "conversation_id": conversation_id,
-                "answer": jawaban_error,
-                "data_basis": "Tabel: gold.shipment_fact",
-                "outcome": "error",
-                "message": {"role": "assistant", "content": jawaban_error}
-            }
+            # GUARD 2: Fallback umum, JANGAN lagi bilang "salah memilih tabel"
+            jawaban_error = "Maaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
+            return simpan_dan_return(conversation_id, jawaban_error)
 
     if (sql or "").strip() == "REFUSED_OUT_OF_SCOPE":
-        jawaban_tolak = "MMaaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
+        jawaban_tolak = "Maaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
         conn_r = _get_sqlite()
         try:
             conn_r.execute(
