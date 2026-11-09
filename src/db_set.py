@@ -6,7 +6,7 @@ import os
 ROOT = Path(__file__).resolve().parent.parent
 
 def get_engine():
-    db_url = os.getenv("RAG_DATABASE_URL") or os.getenv("DATABASE_URL") or "postgresql+psycopg2://user:user@localhost:5432/analytics"
+    db_url = os.getenv("RAG_DATABASE_URL") or os.getenv("DATABASE_URL") or "postgresql://neondb_owner:xxxxxxxx@ep-xxx-ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
     return create_engine(db_url)
 
 def run_sql(connection, file_path: Path):
