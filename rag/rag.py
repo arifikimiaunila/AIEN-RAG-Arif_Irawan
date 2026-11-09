@@ -416,7 +416,7 @@ def ask_conversation_message(
             }
 
     if (sql or "").strip() == "REFUSED_OUT_OF_SCOPE":
-        jawaban_tolak = "Maaf, saya hanya bisa menjawab analitik pengiriman dari data Gold. Untuk ramalan cuaca, silakan cek layanan cuaca."
+        jawaban_tolak = "MMaaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
         conn_r = _get_sqlite()
         try:
             conn_r.execute(
