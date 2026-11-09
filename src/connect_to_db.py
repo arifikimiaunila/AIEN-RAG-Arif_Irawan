@@ -15,7 +15,7 @@ def connect_to_db(
     if rag_database_url is None:
         rag_database_url = os.getenv(
             "RAG_DATABASE_URL",
-            "postgresql+psycopg2://user:user@localhost:5432/analytics",
+            "postgresql://neondb_owner:xxxxxxxx@ep-xxx-ap-southeast-1.aws.neon.tech/neondb?sslmode=require",
         )
 
     if tables is None:
