@@ -2,21 +2,15 @@ import os
 from langchain_community.utilities import SQLDatabase
 from sqlalchemy import create_engine, text
 
-
 def connect_to_db(
     rag_database_url: str | None = None,
     db_schema: str = "gold",
     tables: list[str] | None = None,
 ) -> tuple[SQLDatabase, object]:
-    """Menghubungkan ke database PostgreSQL, memverifikasi koneksi,
-
-    serta mengembalikan objek SQLDatabase LangChain dan engine.
-    """
     if rag_database_url is None:
-        rag_database_url = os.getenv(
-            "RAG_DATABASE_URL",
-            "postgresql://neondb_owner:xxxxxxxx@ep-xxx-ap-southeast-1.aws.neon.tech/neondb?sslmode=require",
-        )
+        rag_database_url = os.getenv("RAG_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not rag_database_url:
+        raise RuntimeError("RAG_DATABASE_URL / DATABASE_URL belum di-set")
 
     if tables is None:
         tables = ["shipment_fact", "carrier_daily", "city_daily"]
@@ -35,7 +29,7 @@ def connect_to_db(
                 text(
                     "SELECT current_database() AS database, "
                     "current_user AS role, "
-                    "current_setting('statement_timeout') AS statement_timeout"
+                    "current_setting('statement_timeout', true) AS statement_timeout"
                 )
             )
             .mappings()
@@ -44,15 +38,12 @@ def connect_to_db(
 
     available_tables = db.get_usable_table_names()
     missing_tables = sorted(set(tables) - set(available_tables))
-
     print(dict(connection_info))
     print("Tabel gold yang tersedia:", available_tables)
-
     if missing_tables:
         raise RuntimeError(
             "Tabel skema gold belum lengkap: "
             + ", ".join(missing_tables)
             + ". Pastikan skrip ETL atau setup database sudah dijalankan."
         )
-
     return db, engine
