@@ -24,7 +24,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg2://user:user@postgres:5432/analytics
+      DATABASE_URL: postgresql://analytics_owner:*******L@ep-sweet-sunset-a1p3q9j5-pooler.ap-southeast-1.aws.neon.tech/analytics?sslmode=require&channel_binding=require
       SQLITE_PATH: /app/conversations/conversations.sqlite3
     volumes:
       - conversation-data:/app/conversations
