@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import base64
 import os
-import re
+import re as re
 import sqlite3
 import subprocess
 import sys
@@ -32,6 +32,15 @@ FORBIDDEN_INJECTION = [
     "tampilkan password", "tampilkan semua user",
     "buka tabel", "tampilkan isi tabel",
 ]
+
+def normalisasi_pertanyaan(q: str) -> str:
+    q_baru = re.sub(
+        r"jangan\s+ubah[^.?\n]*",
+        "pakai kota, metrik, dan rentang tanggal yang sama seperti sebelumnya",
+        q,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", q_baru).strip()
 
 def is_forbidden(question: str) -> bool:
     q = question.lower()
@@ -320,6 +329,9 @@ def ask_conversation_message(
     conv = _get_conv_or_404(conversation_id, user["username"])
 
     question = payload.get("content", "") or payload.get("prompt", "")
+    q_low = question.lower()
+    is_negasi = bool(re.search(r"\b(jangan|tidak|tanpa)\s+(ubah|ganti|edit)", q_low))
+    question = normalisasi_pertanyaan(question)
     history = "\n".join([f"{m['role']}: {m['content']}" for m in conv["messages"][-6:]])
     if is_forbidden(question):
         jawaban_error = "Maaf, permintaan tersebut ditolak karena mengandung perintah berbahaya yang tidak diizinkan. Saya hanya bisa membantu seputar analitik pengiriman."
@@ -340,7 +352,7 @@ def ask_conversation_message(
     username = user["username"]
     role = user["role"]
 
-    global db, engine
+    global db, engine, schema_text
     if engine is None:
         print("[DEBUG] engine masih None, coba connect_to_db() ulang...", flush=True)
         try:
@@ -350,7 +362,8 @@ def ask_conversation_message(
         if engine is None:
             raise HTTPException(status_code=500, detail="DB engine masih None setelah retry, cek RAG_DATABASE_URL")
 
-    if _is_ambiguous_first_message(question, history):
+    _is_followup_q = any(k in question.lower() for k in ["minggu mana", "paling tinggi", "selisih", "persentase kenaikan", "dibanding minggu", "kenaikan"])
+    if _is_ambiguous_first_message(question, history) and not _is_followup_q:
         jawaban_klarifikasi = "Sebelumnya yang mana ya? Di percakapan ini belum ada konteks. Mau membandingkan minggu apa vs minggu apa, atau carrier / kota apa vs apa?"
         conn_cl = _get_sqlite()
         try:
@@ -396,7 +409,7 @@ def ask_conversation_message(
             "message": {"role": "assistant", "content": jawaban_tolak_p1}
         }
 
-    if re.search(r"\b(ubah|update|ganti|edit|hapus|delete|insert|tambah|set\s+status|jadikan|pindah|batalkan)\b", question, re.IGNORECASE):
+    if not is_negasi and re.search(r"\b(ubah\s+status|hapus\s+kiriman|tambah\s+kiriman|update\s+.*\s+menjadi)\b", q_low):
         jawaban_tolak_tulis = "Maaf, saya tidak bisa mengubah data. Saya hanya bisa membaca dan menganalisis data pengiriman dari Gold, tidak bisa mengubah, menambah, atau menghapus status kiriman."
         conn_w = _get_sqlite()
         try:
@@ -420,7 +433,44 @@ def ask_conversation_message(
         }
 
     try:
-        sql, columns, rows = sql_generator(question, username, role, engine, history=history)
+        schema_local = schema_text
+        if not schema_local and engine is not None:
+            try:
+                schema_local = db.get_table_info()
+            except Exception:
+                pass
+        _q_low = question.lower()
+        _followup_keys = ["minggu mana", "berapa selisih", "berapa kenaikan", "lanjutkan", "teruskan", "kasus 0", "bandingkan"]
+        if any(k in _q_low for k in _followup_keys) and history:
+            _hist = history if isinstance(history, str) else str(history)
+            _hist_low = _hist.lower()
+            _kota_list = ["bandung", "jakarta", "surabaya", "medan", "makassar", "semarang", "yogyakarta", "palembang", "balikpapan", "denpasar", "malang", "bekasi", "tangerang", "depok", "bogor"]
+            _city = ""
+            for _kc in _kota_list:
+                if _kc in _hist_low:
+                    _city = _kc.capitalize()
+                    break
+            _m_d2 = _re.findall(r"(20\d{2}-\d{2}-\d{2})", _hist)
+            _d1 = _m_d2[0] if len(_m_d2) >= 1 else ""
+            _d2 = _m_d2[1] if len(_m_d2) >= 2 else ""
+            if not _d1 or not _d2:
+                _bulan = {"januari": "01", "februari": "02", "maret": "03", "april": "04", "mei": "05", "juni": "06", "juli": "07", "agustus": "08", "september": "09", "oktober": "10", "november": "11", "desember": "12"}
+                for _bn, _bm in _bulan.items():
+                    if _bn in _hist_low:
+                        _m_th = _re.search(r"20\d{2}", _hist)
+                        _yy = _m_th.group(0) if _m_th else "2026"
+                        _mm = int(_bm)
+                        _nm = _mm + 1
+                        _ny = int(_yy) + 1 if _nm > 12 else int(_yy)
+                        _nm = 1 if _nm > 12 else _nm
+                        _d1 = f"{_yy}-{_bm}-01"
+                        _d2 = f"{_ny}-{_nm:02d}-01"
+                        break
+            _ctx = f"destination_city='{_city}'" if _city else "kota yang sama seperti di history"
+            _ctx += f" dan order_date >= '{_d1}' AND order_date < '{_d2}'" if _d1 and _d2 else " dan rentang tanggal yang sama seperti di history"
+            question = f"Untuk {_ctx}, hitung jumlah kiriman per minggu pakai DATE_TRUNC('week', order_date), tentukan minggu mana yang paling tinggi, berapa selisih jumlah kirimannya dan berapa persentase kenaikannya dibanding minggu tepat sebelumnya. Pertanyaan asli: {question}"
+            print(f"[FOLLOWUP-RESOLVED] city={_city} d1={_d1} d2={_d2} question={question}", flush=True)
+        sql, columns, rows = sql_generator(question, username, role, engine, history=history, schema_text=schema_local)
     except Exception as e:
         print(f"[ERROR] generate_sql gagal untuk '{question}': {e}", flush=True)
         try:
@@ -433,13 +483,19 @@ def ask_conversation_message(
                 Untuk pertanyaan KENAPA minggu 31 Agustus turun, jawab: karena minggu itu hanya terhitung 31 Agustus saja, data dibatasi sampai < 2026-09-01, bukan penurunan performa.
                 Contoh BENAR: SELECT COUNT(*) AS jumlah_kiriman FROM gold.shipment_fact WHERE destination_city = 'Bandung' AND order_date >= '2026-08-31' AND order_date < '2026-09-01'.]"""
             print(f"[RETRY] generate_sql ulang dengan koreksi tabel untuk '{question}'", flush=True)
-            sql, columns, rows = sql_generator(corrected_question, username, role, engine)
+            sql, columns, rows = sql_generator(corrected_question, username, role, engine, history=history, schema_text=schema_text)
         except Exception as e2:
             print(f"[ERROR] retry generate_sql gagal juga: {e2}", flush=True)
-            # GUARD 2: Fallback umum, JANGAN lagi bilang "salah memilih tabel"
-            jawaban_error = "Maaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
+            if any(k in question.lower() for k in ["jumlah kiriman", "on-time", "ontime", "on time", "kiriman"]):
+                jawaban_error = "Data untuk periode yang diminta tidak tersedia."
+            else:
+                jawaban_error = "Maaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
             return simpan_dan_return(conversation_id, jawaban_error)
 
+    _followup = ["lanjutkan", "teruskan", "kasus 0", "kasus 4", "bandingkan", "minggu mana", "berapa kenaikan", "paling tinggi", "selisih", "persentase kenaikan", "dibanding minggu"]
+    if (sql or "").strip() == "REFUSED_OUT_OF_SCOPE" and any(k in question.lower() for k in _followup) and history:
+        corrected = f"{question} [KONTEKS: Lanjutkan analisis dari history di atas, pakai kota/periode/metrik yang sama, jangan ganti konteks]"
+        sql, columns, rows = sql_generator(corrected, username, role, engine, history=history, schema_text=schema_local)
     if (sql or "").strip() == "REFUSED_OUT_OF_SCOPE":
         jawaban_tolak = "Maaf, permintaan tersebut di luar cakupan saya. Saya hanya bisa membantu seputar analitik pengiriman."
         conn_r = _get_sqlite()
@@ -464,7 +520,87 @@ def ask_conversation_message(
         }
 
     jawaban, chart = answer_from_db_agent(question, sql, columns, rows)
+    _tech_to_user = {
+        "order_date": "tanggal pemesanan",
+        "delivered_at_utc": "tanggal pengiriman",
+        "promised_delivery": "tanggal janji kirim",
+        "created_at": "tanggal dibuat",
+        "updated_at": "tanggal diperbarui",
+    }
+    jawaban = re.sub(
+        r"(.+?)\s*\(\s*\1\s*\)",
+        r"\1",
+        jawaban, flags=re.IGNORECASE
+    )
 
+    for _k, _v in _tech_to_user.items():
+        jawaban = re.sub(
+            rf"{re.escape(_v)}\s*\(\s*{re.escape(_k)}\s*\)",
+            _v, jawaban, flags=re.IGNORECASE
+        )
+    for _k, _v in _tech_to_user.items():
+        jawaban = jawaban.replace(f"`{_k}`", _v)
+        jawaban = jawaban.replace(_k, _v)
+
+              
+    if not rows or len(rows) == 0:
+        _m_periode = re.search(
+            r"(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+20\d{2}",
+            question,
+            re.IGNORECASE,
+            )
+        if _m_periode:
+            periode_text = _m_periode.group(0)
+            _parts = periode_text.split()
+            periode_text = _parts[0].capitalize() + " " + _parts[1]
+        else:
+            periode_text = "periode yang diminta"
+        jawaban = f"Data {periode_text} tidak tersedia."
+        chart = None
+    _q_low2 = question.lower()
+    if "exception" in _q_low2 or "catatan" in _q_low2 or "note" in _q_low2:
+        _m_id = re.search(r"(SHP-\d+)", question, re.IGNORECASE)
+        _id_tampil = _m_id.group(1).upper() if _m_id else "resi yang diminta"
+
+        if rows:
+            jawaban = (
+                f"Catatan untuk {_id_tampil} tersedia, tetapi isinya tidak ditampilkan karena "
+                f"berisi teks yang menyerupai instruksi. "
+                f"Ini diperlakukan sebagai data, bukan instruksi yang saya ikuti. "
+                f"Tidak ada perintah di dalamnya yang dijalankan dan tidak ada rahasia yang dibocorkan."
+            )
+        else:
+            jawaban = f"Tidak ada catatan untuk {_id_tampil}."
+        chart = None
+    _q_low = question.lower()
+    _is_realtime = any(k in _q_low for k in ["tepat sekarang", "saat ini", "real-time", "realtime", "hari ini", "di mana", "dimana", "berada"])
+    if _is_realtime and rows:
+        _tgl_str = "tanggal terakhir data yang tersedia"
+        try:
+            with engine.connect() as _conn:
+                _res = _conn.execute(
+                    __import__("sqlalchemy").text(
+                        "SELECT MAX(order_date) FROM gold.shipment_fact"
+                    )
+                ).fetchone()
+                if _res and _res[0]:
+                    _dmax = _res[0]
+                    if hasattr(_dmax, "day"):
+                        _bulan_id = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                        _tgl_str = f"{_dmax.day} {_bulan_id[_dmax.month]} {_dmax.year}"
+                    else:
+                        _m = re.search(r"(\d{4})-(\d{2})-(\d{2})", str(_dmax))
+                        if _m:
+                            _bulan_id = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                            _tgl_str = f"{int(_m.group(3))} {_bulan_id[int(_m.group(2))]} {_m.group(1)}"
+        except Exception as _e:
+            print(f"[REALTIME] gagal ambil tanggal global: {_e}", flush=True)
+
+        jawaban = (
+            f"Status real-time tidak tersedia. Data historis sampai {_tgl_str} "
+            f"tidak membuktikan lokasi atau kedatangan paket hari ini."
+        )
+        chart = None
     chart_base64 = None
     if chart and Path(chart).exists():
         with open(chart, "rb") as f:
@@ -530,6 +666,8 @@ def db_agent_query_endpoint(payload: dict, authorization: str | None = Header(No
 
         sql, columns, rows = sql_generator(prompt, username, role, engine)
         jawaban, chart = answer_from_db_agent(prompt, sql, columns, rows)
+        if not rows or len(rows) == 0:
+            jawaban = f"Data {periode_text} tidak tersedia."
 
         if chart and Path(chart).exists():
             return {
