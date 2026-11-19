@@ -66,8 +66,6 @@ Buka file `.env` yang baru dibuat, lalu sesuaikan isinya:
 # Connection string dari Langkah 2 (sudah mencakup user, password, host, & database)
 RAG_DATABASE_URL=postgresql://neondb_owner:xxxxxxxx@ep-xxx-ap-southeast-1.aws.neon.tech/neondb?sslmode=require
 
-RAG_DATABASE_URL milik anda  perlu dimasukkan juga ke file connect_to_db.py, send_to_pg.py, dan db_set.py.
-
 # --- Provider Model (OpenAI) ---
 OPENAI_API_KEY=sk-isi-key-anda-di-sini
 LLM_MODEL=gpt-6-luna
