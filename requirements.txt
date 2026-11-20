@@ -13,6 +13,7 @@ langchain-community>=0.3
 langchain-openai>=0.2
 matplotlib>=3.8
 seaborn>=0.13
-fpdf2>=2.7tabulate
+fpdf2>=2.7
+tabulate
 sqlparse
 psycopg[binary]
